@@ -40,6 +40,23 @@ class FrameworkMode(str):
         return normalized
 
 
+
+class FilePolicy(str):
+    DISABLED = "disabled"
+    OPTIONAL = "optional"
+    REQUIRED = "required"
+
+    @classmethod
+    def coerce(cls, value: str | "FilePolicy" | None) -> str:
+        if value is None:
+            return cls.OPTIONAL
+        normalized = str(value).strip().lower()
+        allowed = {cls.DISABLED, cls.OPTIONAL, cls.REQUIRED}
+        if normalized not in allowed:
+            raise ValueError(f"Unsupported file policy: {value!r}")
+        return normalized
+
+
 class SecretPolicy(str):
     DISABLED = "disabled"
     OPTIONAL = "optional"
@@ -85,6 +102,7 @@ class BootstrapSettings:
     common_code_root: str | Path | None = None
     kaggle_home: str | Path | None = None
     overlay_json_path: str | Path | None = None
+    overlay_policy: str = FilePolicy.OPTIONAL
 
     # Optional package installation
     install_requirements: Sequence[str] = field(default_factory=tuple)
@@ -109,6 +127,7 @@ class BootstrapSettings:
         self.analysis_depth = AnalysisDepth.coerce(self.analysis_depth)
         self.framework_mode = FrameworkMode.coerce(self.framework_mode)
         self.kaggle_policy = SecretPolicy.coerce(self.kaggle_policy)
+        self.overlay_policy = FilePolicy.coerce(self.overlay_policy)
         if not isinstance(self.random_seed, int):
             raise TypeError("random_seed must be an int")
         if self.random_seed < 0:
@@ -298,26 +317,56 @@ def _apply_early_env(runtime: RuntimeConfig) -> None:
     os.environ.setdefault("PYTHONHASHSEED", os.getenv("PYTHONHASHSEED", "42"))
 
 
-def _load_overlay(path: str | Path | None) -> dict[str, Any]:
-    if path is None:
-        return {}
-    p = Path(path).expanduser()
+
+def _normalize_pathlike(value: str | Path | None) -> Path | None:
+    if value is None:
+        return None
+    raw = os.path.expandvars(str(value))
+    return Path(raw).expanduser()
+
+
+def _path_looks_like_colab_drive(value: str | Path | None) -> bool:
+    p = _normalize_pathlike(value)
+    if p is None:
+        return False
+    s = p.as_posix()
+    return s == "/content/drive" or s.startswith("/content/drive/")
+
+
+def _load_overlay(
+    path: str | Path | None,
+    policy: str = FilePolicy.OPTIONAL,
+) -> tuple[dict[str, Any], list[str]]:
+    notes: list[str] = []
+    if policy == FilePolicy.DISABLED or path is None:
+        return {}, notes
+
+    p = _normalize_pathlike(path)
+    assert p is not None
+
     if not p.exists():
-        raise FileNotFoundError(f"overlay_json_path not found: {p}")
+        msg = f"overlay_json_path not found: {p}"
+        if policy == FilePolicy.REQUIRED:
+            raise FileNotFoundError(msg)
+        notes.append(msg)
+        return {}, notes
+
     if p.suffix.lower() != ".json":
-        raise ValueError(f"overlay_json_path must point to a JSON file: {p}")
+        msg = f"overlay_json_path must point to a JSON file: {p}"
+        if policy == FilePolicy.REQUIRED:
+            raise ValueError(msg)
+        notes.append(msg)
+        return {}, notes
+
     with p.open("r", encoding="utf-8") as f:
         payload = json.load(f)
     if not isinstance(payload, dict):
         raise ValueError("overlay_json_path must contain a JSON object")
-    return payload
+    return payload, notes
 
 
 def _path_from_any(value: str | Path | None) -> Path | None:
-    if value is None:
-        return None
-    p = Path(value).expanduser()
-    return p
+    return _normalize_pathlike(value)
 
 
 def _default_roots(
@@ -349,6 +398,30 @@ def _safe_mkdir(path: Path, mode: int = 0o750) -> Path:
     except Exception:
         pass
     return path.resolve()
+
+
+
+def _maybe_mount_drive_for_bootstrap(
+    runtime: RuntimeConfig,
+    exec_env: ExecutionEnvironment,
+    settings: BootstrapSettings,
+) -> None:
+    if exec_env != ExecutionEnvironment.COLAB or not settings.mount_drive:
+        return
+
+    candidates = [
+        settings.overlay_json_path,
+        settings.persistent_root,
+        settings.workspace_root,
+        settings.common_code_root,
+        settings.kaggle_home,
+    ]
+    should_mount = any(_path_looks_like_colab_drive(item) for item in candidates)
+
+    # If caller explicitly wants drive mounting in Colab, mount even when no path
+    # currently points inside /content/drive, so downstream code can rely on it.
+    if should_mount or settings.mount_drive:
+        _maybe_mount_drive(runtime, exec_env, mount_drive=True)
 
 
 def _maybe_mount_drive(runtime: RuntimeConfig, exec_env: ExecutionEnvironment, mount_drive: bool) -> None:
@@ -639,16 +712,27 @@ def configure_tensorflow(runtime: RuntimeConfig) -> list[str]:
     return notes
 
 
+
 def bootstrap_environment(settings: BootstrapSettings) -> BootstrapResult:
     exec_env = _coerce_exec_env(settings.force_exec_env)
     runtime = RuntimeConfig(mode=settings.runlevel, exec_env=exec_env, logger_name="mktools.bootstrap")
     _apply_early_env(runtime)
-    overlay = _load_overlay(settings.overlay_json_path)
 
-    capabilities = probe_capabilities()
     warnings_raised: list[str] = []
 
-    _maybe_mount_drive(runtime, exec_env, settings.mount_drive)
+    # In Colab, mount Drive before attempting to read overlays or user-specified
+    # roots that may live under /content/drive.
+    _maybe_mount_drive_for_bootstrap(runtime, exec_env, settings)
+
+    overlay, overlay_notes = _load_overlay(
+        settings.overlay_json_path,
+        policy=settings.overlay_policy,
+    )
+    warnings_raised.extend(overlay_notes)
+    for note in overlay_notes:
+        runtime.logger.info("%s", note)
+
+    capabilities = probe_capabilities()
 
     installed, failures = ensure_python_packages(
         requirements=settings.install_requirements,
@@ -749,6 +833,7 @@ __all__ = [
     "BootstrapSettings",
     "BootstrapResult",
     "CapabilityReport",
+    "FilePolicy",
     "FrameworkMode",
     "ProjectPaths",
     "SecretPolicy",

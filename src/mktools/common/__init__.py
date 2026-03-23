@@ -1,9 +1,9 @@
-from .exceptions import MktoolsError, PathValidationError, UnsupportedFileTypeError, UnsafeArchiveError
-from .runtime import AnalysisDepth, ExecutionEnvironment, RuntimeConfig, RuntimeMode, detect_exec_env
+
 from .bootstrap import (
     BootstrapResult,
     BootstrapSettings,
     CapabilityReport,
+    FilePolicy,
     FrameworkMode,
     ProjectPaths,
     SecretPolicy,
@@ -11,6 +11,7 @@ from .bootstrap import (
     print_bootstrap_summary,
     probe_capabilities,
 )
+from .runtime import AnalysisDepth, ExecutionEnvironment, RuntimeConfig, RuntimeMode
 
 __all__ = [
     "AnalysisDepth",
@@ -18,9 +19,8 @@ __all__ = [
     "BootstrapSettings",
     "CapabilityReport",
     "ExecutionEnvironment",
+    "FilePolicy",
     "FrameworkMode",
-    "MktoolsError",
-    "PathValidationError",
     "ProjectPaths",
     "RuntimeConfig",
     "RuntimeMode",
@@ -28,10 +28,4 @@ __all__ = [
     "bootstrap_environment",
     "print_bootstrap_summary",
     "probe_capabilities",
-    "UnsupportedFileTypeError",
-    "UnsafeArchiveError",
-    "detect_exec_env",
 ]
-
-
-
