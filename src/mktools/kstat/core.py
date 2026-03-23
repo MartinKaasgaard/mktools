@@ -190,6 +190,22 @@ class KStatProfiler:
         if not 0 <= float(value) <= 1:
             raise ValueError(f"{field} must be between 0 and 1.")
 
+    @staticmethod
+    def _validate_fraction(value: float, label: str) -> None:
+        """
+        Validate that a numeric value is a fraction in the inclusive range [0, 1].
+        """
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"{label} must be a numeric value in [0, 1].")
+
+        value = float(value)
+
+        if pd.isna(value):
+            raise ValueError(f"{label} must not be NaN.")
+
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"{label} must be in the inclusive range [0, 1].")
+
     def _refresh_after_mutation(self) -> None:
         self.catalog.refresh(self.df)
         self.reports.clear()
@@ -198,13 +214,103 @@ class KStatProfiler:
         self.reports[name] = obj
         return obj
 
-    def _ensure_columns_exist(self, columns: Iterable[str], *, label: str = "columns") -> list[str]:
-        cols = list(columns)
+    def _ensure_columns_exist(self, columns, *, label: str = "columns") -> None:
+        """
+        Ensure that all specified columns exist in self.df.
+
+        Parameters
+        ----------
+        columns : iterable[str] | str
+            Column name or iterable of column names to validate.
+        label : str, default="columns"
+            Label used in error messages.
+
+        Raises
+        ------
+        TypeError
+            If columns is not a string or iterable of strings.
+        KeyError
+            If one or more columns are missing from self.df.
+        """
+        if columns is None:
+            return
+
+        if isinstance(columns, str):
+            cols = [columns]
+        else:
+            try:
+                cols = list(columns)
+            except TypeError as exc:
+                raise TypeError(f"{label} must be a string or an iterable of strings.") from exc
+
+        if not all(isinstance(col, str) for col in cols):
+            raise TypeError(f"{label} must contain only strings.")
+
+        if not cols:
+            return
+
         missing = [col for col in cols if col not in self.df.columns]
         if missing:
-            raise KeyError(f"Unknown {label}: {missing}")
-        return cols
+            raise KeyError(f"Unknown {label}: {missing}")        
+        
+    @staticmethod
+    def _empty_report(columns: list[str]) -> pd.DataFrame:
+        if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+            raise TypeError("columns must be a list[str].")
+        return pd.DataFrame(columns=columns)
 
+    @staticmethod
+    def _sort_report(
+        df: pd.DataFrame,
+        by: list[str] | str,
+        ascending: bool | list[bool] = True,
+    ) -> pd.DataFrame:
+        if not isinstance(df, pd.DataFrame):
+            raise TypeError("df must be a pandas DataFrame.")
+
+        if df.empty:
+            return df.reset_index(drop=True)
+
+        by_cols = [by] if isinstance(by, str) else list(by)
+
+        missing = [col for col in by_cols if col not in df.columns]
+        if missing:
+            raise KeyError(f"Cannot sort report; missing columns: {missing}")
+
+        return df.sort_values(by=by_cols, ascending=ascending).reset_index(drop=True)
+
+    @staticmethod
+    def _finalize_report(
+        rows: list[dict],
+        columns: list[str],
+        sort_by: list[str] | str | None = None,
+        ascending: bool | list[bool] = True,
+    ) -> pd.DataFrame:
+        if not isinstance(rows, list):
+            raise TypeError("rows must be a list of dictionaries.")
+        if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+            raise TypeError("columns must be a list[str].")
+
+        if not rows:
+            result = pd.DataFrame(columns=columns)
+        else:
+            result = pd.DataFrame(rows)
+
+            for col in columns:
+                if col not in result.columns:
+                    result[col] = pd.NA
+
+            result = result[columns]
+
+        if sort_by is not None and not result.empty:
+            by_cols = [sort_by] if isinstance(sort_by, str) else list(sort_by)
+            missing = [col for col in by_cols if col not in result.columns]
+            if missing:
+                raise KeyError(f"Cannot sort report; missing columns: {missing}")
+            result = result.sort_values(by=by_cols, ascending=ascending)
+
+        return result.reset_index(drop=True)
+        
     @staticmethod
     def _safe_divide(numerator: float, denominator: float) -> float:
         return 0.0 if denominator == 0 else float(numerator / denominator)
@@ -470,7 +576,9 @@ class KStatProfiler:
 
     def cardinality_summary(self, high_cardinality_threshold: int = 50) -> pd.DataFrame:
         self._validate_positive_int(high_cardinality_threshold, "high_cardinality_threshold", minimum=1)
+
         object_like = self.df.select_dtypes(include=["object", "string", "category"]).columns.tolist()
+
         rows = [
             {
                 "column": col,
@@ -479,9 +587,15 @@ class KStatProfiler:
             }
             for col in object_like
         ]
-        result = pd.DataFrame(rows).sort_values(["unique_non_null", "column"], ascending=[False, True]).reset_index(drop=True)
-        return self._cache("cardinality", result)
 
+        result = self._finalize_report(
+            rows=rows,
+            columns=["column", "unique_non_null", "high_cardinality"],
+            sort_by=["unique_non_null", "column"],
+            ascending=[False, True],
+        )
+        return self._cache("cardinality", result)
+    
     def constant_columns(self, near_constant_threshold: float = 0.99) -> pd.DataFrame:
         self._validate_ratio(near_constant_threshold, "near_constant_threshold")
         rows = []
@@ -504,32 +618,35 @@ class KStatProfiler:
         result = pd.DataFrame(rows).sort_values(["is_constant", "top_ratio", "column"], ascending=[False, False, True]).reset_index(drop=True)
         return self._cache("constant_columns", result)
 
-    def rare_levels_summary(self, *, max_levels: int = 50, rare_level_threshold: float = 0.01) -> pd.DataFrame:
-        self._validate_positive_int(max_levels, "max_levels", minimum=1)
-        self._validate_ratio(rare_level_threshold, "rare_level_threshold")
-        rows = []
-        for col in self.df.select_dtypes(include=["object", "string", "category", "boolean"]).columns:
-            s = self.df[col].dropna()
-            if s.empty:
-                continue
-            vc = s.value_counts(normalize=True, dropna=False)
-            if len(vc) > max_levels:
-                continue
-            rare_mask = vc < rare_level_threshold
-            rows.append(
-                {
-                    "column": col,
-                    "levels": int(len(vc)),
-                    "rare_levels": int(rare_mask.sum()),
-                    "rare_row_pct": round(float(vc[rare_mask].sum() * 100), 4),
-                    "top_levels": vc.head(5).to_dict(),
-                }
-            )
-        result = pd.DataFrame(rows)
-        if not result.empty:
-            result = result.sort_values(["rare_levels", "rare_row_pct", "column"], ascending=[False, False, True]).reset_index(drop=True)
-        return self._cache("rare_levels", result)
+    def rare_levels_summary(self, rare_threshold: float = 0.01, top_n: int = 10) -> pd.DataFrame:
+        self._validate_fraction(rare_threshold, "rare_threshold")
+        self._validate_positive_int(top_n, "top_n", minimum=1)
 
+        object_like = self.df.select_dtypes(include=["object", "string", "category"]).columns.tolist()
+        rows = []
+
+        for col in object_like:
+            value_counts = self.df[col].value_counts(dropna=True, normalize=True)
+            rare = value_counts[value_counts < rare_threshold]
+
+            for value, frac in rare.head(top_n).items():
+                rows.append(
+                    {
+                        "column": col,
+                        "level": value,
+                        "frequency_ratio": float(frac),
+                        "frequency_percent": float(frac * 100.0),
+                    }
+                )
+
+        result = self._finalize_report(
+            rows=rows,
+            columns=["column", "level", "frequency_ratio", "frequency_percent"],
+            sort_by=["column", "frequency_ratio"],
+            ascending=[True, True],
+        )
+        return self._cache("rare_levels", result)
+    
     def descriptive_stats(self) -> pd.DataFrame:
         if self.df.empty:
             return self._cache("descriptive_stats", pd.DataFrame())

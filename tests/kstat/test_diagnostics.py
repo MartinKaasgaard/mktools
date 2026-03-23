@@ -50,3 +50,33 @@ def test_eda_handoff_bundle() -> None:
     assert "row_id" in handoff.prepared_df.columns
     assert handoff.prepared_df["amount"].dtype.kind in {"f", "i"}
     assert not handoff.prep_report.empty
+
+
+def test_cardinality_summary_all_numeric_returns_empty_schema():
+    df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+    profiler = KStatProfiler(df, dataset_name="numeric_only", depth="deep")
+    result = profiler.cardinality_summary()
+
+    assert list(result.columns) == ["column", "unique_non_null", "high_cardinality"]
+    assert result.empty
+
+
+def test_rare_levels_summary_all_numeric_returns_empty_schema():
+    df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+    profiler = KStatProfiler(df, dataset_name="numeric_only", depth="deep")
+    result = profiler.rare_levels_summary()
+
+    assert list(result.columns) == ["column", "level", "frequency_ratio", "frequency_percent"]
+    assert result.empty
+
+
+def test_finalize_report_empty_rows_preserves_columns():
+    result = KStatProfiler._finalize_report(
+        rows=[],
+        columns=["column", "score"],
+        sort_by=["score", "column"],
+        ascending=[False, True],
+    )
+
+    assert list(result.columns) == ["column", "score"]
+    assert result.empty
