@@ -4,14 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mktools"
-version = "0.1.0"
-description = "Martin Kaasgaard's reusable Python tools for analytics, statistics, ML, and notebooks."
+version = "0.2.0"
+description = "Martin Kaasgaard's reusable Python tools for analytics, I/O, and filesystem workflows."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
-authors = [
-  { name = "Martin Kaasgaard" }
-]
 dependencies = [
   "numpy>=1.24",
   "pandas>=2.0",
@@ -20,23 +16,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
-  "pytest-cov>=4.0",
-  "ruff>=0.5.0",
-  "black>=24.0",
-  "mypy>=1.8",
-  "ipykernel>=6.0",
 ]
 io = [
   "openpyxl>=3.1",
   "pyarrow>=16.0",
-]
-eda = [
-  "matplotlib>=3.8",
-  "seaborn>=0.13",
-]
-notebooks = [
-  "jupyter>=1.0",
-  "notebook>=7.0",
 ]
 
 [tool.setuptools]
@@ -45,12 +28,7 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.black]
-line-length = 100
-
-[tool.ruff]
-line-length = 100
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-ra"
 pythonpath = ["src"]

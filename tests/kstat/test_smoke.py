@@ -14,23 +14,11 @@ def test_smoke() -> None:
             "flag": ["yes", "no", None],
         }
     )
-
     profiler = KStatProfiler(df, dataset_name="smoke", depth="deep")
     reports = profiler.profile()
-
     assert reports["missingness"].shape[0] == df.shape[1]
     assert "recommended_dtype" in reports["dtype_audit"].columns
-
     cleaned = profiler.prepare_for_eda(coerce_dtypes=True, inplace=False)
     assert "value" in cleaned.columns
-
-    parsed, report = DateSeriesValidator(date_format="%Y-%m-%d", allow_future=True).validate(
-        df["date"],
-        raise_on_error=False,
-    )
+    _, report = DateSeriesValidator(date_format="%Y-%m-%d", allow_future=True).validate(df["date"], raise_on_error=False)
     assert report.invalid_rows == 1
-
-
-if __name__ == "__main__":
-    test_smoke()
-    print("Smoke test passed.")
