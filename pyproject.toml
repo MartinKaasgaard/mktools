@@ -26,6 +26,10 @@ dev = [
   "mypy>=1.8",
   "ipykernel>=6.0",
 ]
+io = [
+  "openpyxl>=3.1",
+  "pyarrow>=16.0",
+]
 eda = [
   "matplotlib>=3.8",
   "seaborn>=0.13",
