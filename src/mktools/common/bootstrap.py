@@ -22,6 +22,13 @@ import numpy as np
 from .runtime import AnalysisDepth, ExecutionEnvironment, RuntimeConfig, RuntimeMode, detect_exec_env
 
 
+warnings.filterwarnings(
+    "ignore",
+    message=r"datetime\.datetime\.utcnow\(\) is deprecated.*",
+    category=DeprecationWarning,
+    module=r"jupyter_client\.session",
+)
+
 class FrameworkMode(str):
     NONE = "none"
     TENSORFLOW = "tensorflow"
