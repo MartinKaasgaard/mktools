@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mktools"
-version = "0.3"
+version = "0.3.1"
 author = "Martin Kaasgaard"
 description = "Martin Kaasgaard's reusable Python tools for analytics, I/O, and filesystem workflows."
 license = "MIT License"
@@ -17,11 +17,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0",
+    "pytest>=8.0",
 ]
 io = [
-  "openpyxl>=3.1",
-  "pyarrow>=16.0",
+    "openpyxl>=3.1",
+    "pyarrow>=16.0",
 ]
 
 [tool.setuptools]
@@ -33,4 +33,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+	"integration: tests that require network access or external services",
+]
 pythonpath = ["src"]

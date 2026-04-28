@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import bz2
 import fnmatch
 import hashlib
 import os
 import shutil
 import stat
 import zipfile
-import bz2
-
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -500,46 +499,69 @@ class DecompressionReport:
     source_size_bytes: int
     output_size_bytes: int | None
 
-    def to_dict(self) -> dict:
-        return {
-            "source": self.source,
-            "output": self.output,
-            "status": self.status,
-            "source_size_bytes": self.source_size_bytes,
-            "output_size_bytes": self.output_size_bytes,
-        }
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class Bz2Handler:
     """
-    Handler for single-file .bz2 compression.
+    Handler for single-file .bz2 decompression.
 
+    A .bz2 file is normally one compressed file, not a multi-file archive.
     Example:
-        Bz2Handler("turbine_80.json.bz2").ensure_decompressed(DATA_EXTRACTED)
+        turbine_80.json.bz2 -> turbine_80.json
     """
 
-    def __init__(self, path: str | Path, runtime=None) -> None:
-        self.path = Path(path)
-        self.runtime = runtime
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        runtime: RuntimeConfig | None = None,
+    ) -> None:
+        self.path = FileSystemOps.ensure_exists(
+            path,
+            must_be_file=True,
+            parameter_name="path",
+        )
 
         if self.path.suffix.lower() != ".bz2":
-            raise ValueError(f"Expected a .bz2 file, got: {self.path}")
+            raise PathValidationError(f"path must point to a .bz2 file: {self.path}")
+
+        self.runtime = runtime or RuntimeConfig(
+            mode=RuntimeMode.DEVELOPMENT,
+            logger_name="mktools.kfile",
+        )
 
     def ensure_decompressed(
         self,
-        destination: str | Path,
+        destination: str | os.PathLike[str],
         *,
-        preserve_relative_to: str | Path | None = None,
+        preserve_relative_to: str | os.PathLike[str] | None = None,
         overwrite: bool = False,
     ) -> DecompressionReport:
-        destination = Path(destination)
+        destination_path = FileSystemOps.ensure_directory(
+            destination,
+            create=True,
+            parameter_name="destination",
+        )
 
         if preserve_relative_to is not None:
-            relative_path = self.path.relative_to(Path(preserve_relative_to))
+            base_path = FileSystemOps.ensure_directory(
+                preserve_relative_to,
+                parameter_name="preserve_relative_to",
+            )
+            try:
+                relative_path = self.path.relative_to(base_path)
+            except ValueError as exc:
+                raise PathValidationError(
+                    f"Cannot preserve relative path because {self.path} "
+                    f"is not inside {base_path}."
+                ) from exc
+
             output_relative_path = relative_path.with_suffix("")
-            output_path = destination / output_relative_path
+            output_path = destination_path / output_relative_path
         else:
-            output_path = destination / self.path.with_suffix("").name
+            output_path = destination_path / self.path.with_suffix("").name
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -563,3 +585,17 @@ class Bz2Handler:
             output_size_bytes=output_path.stat().st_size,
         )
 
+
+def ensure_decompressed_bz2(
+    path: str | os.PathLike[str],
+    destination: str | os.PathLike[str],
+    *,
+    preserve_relative_to: str | os.PathLike[str] | None = None,
+    overwrite: bool = False,
+    runtime: RuntimeConfig | None = None,
+) -> DecompressionReport:
+    return Bz2Handler(path, runtime=runtime).ensure_decompressed(
+        destination,
+        preserve_relative_to=preserve_relative_to,
+        overwrite=overwrite,
+    )

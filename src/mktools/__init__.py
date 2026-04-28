@@ -1,4 +1,9 @@
-from .common.runtime import AnalysisDepth, ExecutionEnvironment, RuntimeConfig, RuntimeMode
+from .common.runtime import (
+    AnalysisDepth,
+    ExecutionEnvironment,
+    RuntimeConfig,
+    RuntimeMode,
+)
 from . import repo
 
 __all__ = [
@@ -9,5 +14,4 @@ __all__ = [
     "repo",
 ]
 
-__version__ = "0.2.2"
-
+__version__ = "0.3.1"
