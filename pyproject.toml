@@ -5,7 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mktools"
 version = "0.3"
+author = "Martin Kaasgaard"
 description = "Martin Kaasgaard's reusable Python tools for analytics, I/O, and filesystem workflows."
+license = "MIT License"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
