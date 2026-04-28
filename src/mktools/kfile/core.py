@@ -562,3 +562,4 @@ class Bz2Handler:
             source_size_bytes=self.path.stat().st_size,
             output_size_bytes=output_path.stat().st_size,
         )
+
