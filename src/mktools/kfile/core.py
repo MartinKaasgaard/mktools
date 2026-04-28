@@ -6,6 +6,8 @@ import os
 import shutil
 import stat
 import zipfile
+import bz2
+
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -488,3 +490,75 @@ def ensure_unzipped(
     runtime: RuntimeConfig | None = None,
 ) -> ArchiveExtractionReport:
     return ZipHandler(zip_path, runtime=runtime).ensure_unzipped(target_dir)
+
+
+@dataclass(frozen=True)
+class DecompressionReport:
+    source: str
+    output: str
+    status: str
+    source_size_bytes: int
+    output_size_bytes: int | None
+
+    def to_dict(self) -> dict:
+        return {
+            "source": self.source,
+            "output": self.output,
+            "status": self.status,
+            "source_size_bytes": self.source_size_bytes,
+            "output_size_bytes": self.output_size_bytes,
+        }
+
+
+class Bz2Handler:
+    """
+    Handler for single-file .bz2 compression.
+
+    Example:
+        Bz2Handler("turbine_80.json.bz2").ensure_decompressed(DATA_EXTRACTED)
+    """
+
+    def __init__(self, path: str | Path, runtime=None) -> None:
+        self.path = Path(path)
+        self.runtime = runtime
+
+        if self.path.suffix.lower() != ".bz2":
+            raise ValueError(f"Expected a .bz2 file, got: {self.path}")
+
+    def ensure_decompressed(
+        self,
+        destination: str | Path,
+        *,
+        preserve_relative_to: str | Path | None = None,
+        overwrite: bool = False,
+    ) -> DecompressionReport:
+        destination = Path(destination)
+
+        if preserve_relative_to is not None:
+            relative_path = self.path.relative_to(Path(preserve_relative_to))
+            output_relative_path = relative_path.with_suffix("")
+            output_path = destination / output_relative_path
+        else:
+            output_path = destination / self.path.with_suffix("").name
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if output_path.exists() and output_path.stat().st_size > 0 and not overwrite:
+            return DecompressionReport(
+                source=str(self.path),
+                output=str(output_path),
+                status="skipped_existing",
+                source_size_bytes=self.path.stat().st_size,
+                output_size_bytes=output_path.stat().st_size,
+            )
+
+        with bz2.open(self.path, "rb") as src, output_path.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+
+        return DecompressionReport(
+            source=str(self.path),
+            output=str(output_path),
+            status="decompressed",
+            source_size_bytes=self.path.stat().st_size,
+            output_size_bytes=output_path.stat().st_size,
+        )
